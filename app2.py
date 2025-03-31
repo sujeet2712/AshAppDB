@@ -9,7 +9,7 @@ st.set_page_config(page_title="IntegriTEX – Analysis", layout="centered")
 
 SUPABASE_URL = "https://afcpqvesmqvfzbcilffx.supabase.co"
 SUPABASE_API = f"{SUPABASE_URL}/rest/v1/reference_samples"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFmY3BxdmVzbXF2ZnpiY2lsZmZ4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDI5MjI0MjAsImV4cCI6MjA1ODQ5ODQyMH0.8jJDrlUBcWtYRGyjlvnFvKDf_gn54ozzgD2diGfrFb4"
+SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 
 @st.cache_data(ttl=300, show_spinner="Loading data from Supabase...")
 def load_data():
@@ -38,8 +38,8 @@ def build_fiber_models(df, signal_max_limit=1000):
             (df["signal_count"] <= signal_max_limit)
         ]
         if len(subset) >= 3:
-            X = subset[["signal_count"]]
-            y = subset["true_marker_percent"]
+            X = subset[["true_marker_percent"]]  # Marker content as X-axis
+            y = subset["signal_count"]  # Signal count as Y-axis
             model = LinearRegression().fit(X, y)
             models[fiber] = {"model": model, "X": X, "y": y}
     return models
@@ -53,7 +53,6 @@ def estimate_confidence_interval(model, X, y, new_x):
     upper = prediction + rmse
     return prediction, lower, upper, rmse
 
-# UI
 st.title("📊 IntegriTEX – Marker Fiber Estimation")
 
 st.subheader("🔍 Input")
@@ -72,7 +71,7 @@ reload = st.button("🔄 Reload data from Supabase")
 
 if reload:
     load_data.clear()
-    st.info("✅ Cache cleared – fresh data will be loaded.")
+    st.experimental_rerun()
 
 total = white + black + denim + natural
 
@@ -95,18 +94,6 @@ if submit:
         if df.empty:
             st.stop()
 
-        ref_match = df[
-            (df["signal_count"] == signal) &
-            (df["percent_white"] == white) &
-            (df["percent_black"] == black) &
-            (df["percent_denim"] == denim) &
-            (df["percent_natural"] == natural)
-        ]
-        if not ref_match.empty:
-            known_value = ref_match.iloc[0]["true_marker_percent"]
-            st.info(f"📌 Known reference found: **{known_value:.2f}%** marker fiber content.")
-
-        max_plot_signal = df[df["signal_count"] <= 1000]["signal_count"].max()
         models = build_fiber_models(df, signal_max_limit=1000)
 
         if not models:
@@ -138,7 +125,6 @@ if submit:
 
         # Plot
         st.subheader("📉 Visualization")
-
         plot_df = df[
             df["signal_count"].notna() &
             df["true_marker_percent"].notna() &
@@ -146,17 +132,17 @@ if submit:
         ]
 
         fig, ax = plt.subplots(figsize=(8, 5))
-        ax.set_title("Signal vs. Marker – with Regression Lines")
+        ax.set_title("Marker Fiber Content vs. Signal Count")
         ax.scatter(
-            plot_df["signal_count"],
             plot_df["true_marker_percent"],
+            plot_df["signal_count"],
             alpha=0.3,
             label="Reference Data"
         )
 
-        x_range = np.linspace(0, max_plot_signal * 1.1, 100)
-        ax.set_xlim(0, max_plot_signal * 1.1)
-        ax.set_ylim(0, 120)
+        x_range = np.linspace(0, 120, 100)
+        ax.set_xlim(0, 120)
+        ax.set_ylim(0, plot_df["signal_count"].max() * 1.1)
 
         for fiber, entry in models.items():
             model = entry["model"]
@@ -164,7 +150,13 @@ if submit:
             y_line = np.clip(y_line, entry["y"].min(), entry["y"].max())
             ax.plot(x_range, y_line, label=fiber.replace("percent_", "").capitalize())
 
-        ax.scatter(signal, prediction_total, color="red", label="Your Input", zorder=10, s=80)
+        ax.scatter(prediction_total, signal, color="red", label="Your Input", zorder=10, s=80)
+
+        ax.set_xlabel("Marker Fiber Content (%)")
+        ax.set_ylabel("Signal Count")
+        ax.grid(True)
+        ax.legend()
+        st.pyplot(fig)
 
         ax.set_xlabel("Signal Count")
         ax.set_ylabel("Marker Fiber Content (%)")
